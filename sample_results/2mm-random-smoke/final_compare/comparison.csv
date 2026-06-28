@@ -1,0 +1,6 @@
+label,mean_seconds,stddev_seconds,source
+O1,1.6e-05,0.0,polybench
+O2,9e-06,0.0,polybench
+O3,1.1e-05,0.0,polybench
+Ofast,1.8e-05,0.0,polybench
+tuned,5.2e-05,0.0,polybench

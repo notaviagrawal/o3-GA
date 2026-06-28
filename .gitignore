@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+venv/
+py_results/
+*.log
+
+# Native build outputs from tuner runs.
+bin/
+*.out
+*.exe
+
