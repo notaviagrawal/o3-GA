@@ -44,6 +44,9 @@ func MatchBinaryWithFlags(X Vector, OptLevel string) (string, map[string]int) {
 }
 
 func addPolybenchDependencies(command string, problem string, out_file string) string {
+	if dataset := os.Getenv("EAFT_DATASET"); dataset != "" {
+		command += "-D" + dataset + " "
+	}
 	command += path.Join(utils.Files, problem) + `.c` + ` -I` + utils.Utilities + ` --include ` + `polybench.c` + ` -o ` + path.Join(utils.ResultsPath, os.Args[1], "bin", out_file)
 	return command
 }

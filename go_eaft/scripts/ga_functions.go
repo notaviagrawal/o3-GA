@@ -340,14 +340,20 @@ func buildReferenceDump(app string) ([]byte, error) {
 	args := []string{
 		"-O0",
 		"-DPOLYBENCH_DUMP_ARRAYS",
+	}
+	if dataset := os.Getenv("EAFT_DATASET"); dataset != "" {
+		args = append(args, "-D"+dataset)
+	}
+	args = append(
+		args,
 		filepath.Join(utils.Files, os.Args[1]+".c"),
-		"-I" + utils.Utilities,
+		"-I"+utils.Utilities,
 		"--include",
 		"polybench.c",
 		"-lm",
 		"-o",
 		referencePath,
-	}
+	)
 	out, err := exec.Command(app, args...).CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("reference compile failed: %s", string(out))

@@ -24,6 +24,11 @@ func main() {
 		correctness = "off"
 	}
 	fmt.Printf("EAFT_CORRECTNESS=%s\n", correctness)
+	dataset := os.Getenv("EAFT_DATASET")
+	if dataset == "" {
+		dataset = "polybench_default"
+	}
+	fmt.Printf("EAFT_DATASET=%s\n", dataset)
 	switch os.Args[4] {
 	case "GA":
 		scripts.GARunner()
