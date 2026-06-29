@@ -141,8 +141,9 @@ class PolyBenchEvaluator:
 
         compile_flags = vector_to_compile_flags(vector, self.flag_space)
         candidate_id = self.candidate_id(vector)
-        dump_bin = self.bin_dir / f"{candidate_id}_dump"
-        time_bin = self.bin_dir / f"{candidate_id}_time"
+        binary_prefix = f"g{generation:04d}_c{candidate_index:04d}_{candidate_id}"
+        dump_bin = self.bin_dir / f"{binary_prefix}_dump"
+        time_bin = self.bin_dir / f"{binary_prefix}_time"
 
         started = time.time()
 
@@ -241,4 +242,3 @@ def require_tool(name: str) -> str:
     if not path:
         raise RuntimeError(f"Required tool not found on PATH: {name}")
     return path
-

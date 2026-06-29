@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Sequence
 
 import numpy as np
 
@@ -11,6 +11,8 @@ from .flag_sets import FlagSpace, normalize_vector
 
 
 FitnessFn = Callable[[list[int], int, int], float]
+FitnessBatch = Sequence[tuple[list[int], int, int]]
+BatchFitnessFn = Callable[[FitnessBatch], list[float]]
 
 
 @dataclass(frozen=True)
@@ -30,13 +32,17 @@ def run_random_search(
     budget: int,
     fitness_fn: FitnessFn,
     seed: int,
+    batch_fitness_fn: BatchFitnessFn | None = None,
 ) -> OptimizerResult:
     rng = random.Random(seed)
     best_vector: list[int] | None = None
     best_fitness = math.inf
-    for i in range(budget):
-        vector = random_vector(space, rng)
-        fitness = fitness_fn(vector, 0, i)
+    candidates = [(random_vector(space, rng), 0, i) for i in range(budget)]
+    fitnesses = batch_fitness_fn(candidates) if batch_fitness_fn else [
+        fitness_fn(vector, generation, candidate_index)
+        for vector, generation, candidate_index in candidates
+    ]
+    for (vector, _, _), fitness in zip(candidates, fitnesses):
         if fitness < best_fitness:
             best_fitness = fitness
             best_vector = vector
@@ -51,6 +57,7 @@ def run_deap_ga(
     pop_size: int,
     fitness_fn: FitnessFn,
     seed: int,
+    batch_fitness_fn: BatchFitnessFn | None = None,
 ) -> OptimizerResult:
     try:
         from deap import base, creator, tools
@@ -82,8 +89,12 @@ def run_deap_ga(
 
     for generation in range(generations):
         invalid = [ind for ind in population if not ind.fitness.valid]
-        for idx, ind in enumerate(invalid):
-            fitness = fitness_fn(list(ind), generation, idx)
+        candidates = [(list(ind), generation, idx) for idx, ind in enumerate(invalid)]
+        fitnesses = batch_fitness_fn(candidates) if batch_fitness_fn else [
+            fitness_fn(vector, generation, candidate_index)
+            for vector, generation, candidate_index in candidates
+        ]
+        for ind, fitness in zip(invalid, fitnesses):
             ind.fitness.values = (fitness,)
             if fitness < best_fitness:
                 best_fitness = fitness
@@ -141,6 +152,7 @@ def run_pyswarms_pso(
     pop_size: int,
     fitness_fn: FitnessFn,
     seed: int,
+    batch_fitness_fn: BatchFitnessFn | None = None,
 ) -> OptimizerResult:
     try:
         import pyswarms as ps
@@ -155,11 +167,16 @@ def run_pyswarms_pso(
 
     def objective(x: np.ndarray) -> np.ndarray:
         nonlocal best_vector, best_fitness, eval_counter, current_generation
+        candidates = []
+        for i, particle in enumerate(x):
+            candidates.append((normalize_vector(particle.tolist(), space), current_generation, eval_counter + i))
+        fitnesses = batch_fitness_fn(candidates) if batch_fitness_fn else [
+            fitness_fn(vector, generation, candidate_index)
+            for vector, generation, candidate_index in candidates
+        ]
+        eval_counter += len(candidates)
         scores = []
-        for particle in x:
-            vector = normalize_vector(particle.tolist(), space)
-            fitness = fitness_fn(vector, current_generation, eval_counter)
-            eval_counter += 1
+        for (vector, _, _), fitness in zip(candidates, fitnesses):
             if fitness < best_fitness:
                 best_fitness = fitness
                 best_vector = vector
@@ -230,4 +247,3 @@ def run_pymoo_ga(
     if best_vector is None:
         raise RuntimeError("pymoo GA did not evaluate any candidates")
     return OptimizerResult(best_vector, best_fitness)
-
