@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ var bestRuntime = math.Inf(1)
 var referenceOnce sync.Once
 var referenceDump []byte
 var referenceErr error
+var workerSemaphore = makeWorkerSemaphore()
 
 type evalLogEntry struct {
 	Algorithm      string    `json:"algorithm"`
@@ -133,6 +135,9 @@ func InitBinaryFloat64(n uint, lower, upper float64, rng *rand.Rand) (floats []f
 }
 
 func CompileCode(cmd string, id string, count int) (Total float64) {
+	releaseWorker := acquireWorker()
+	defer releaseWorker()
+
 	evalIndex := atomic.AddUint64(&evalCounter, 1)
 	app := os.Args[2]
 	exec_file := filepath.Join(utils.ResultsPath, os.Args[1], "bin", id)
@@ -246,6 +251,30 @@ func CompileCode(cmd string, id string, count int) (Total float64) {
 	})
 	utils.TotalRunTimes = append(utils.TotalRunTimes, math.Floor(Total*100)/100)
 	return
+}
+
+func makeWorkerSemaphore() chan struct{} {
+	raw := os.Getenv("EAFT_WORKERS")
+	if raw == "" {
+		return nil
+	}
+	workers, err := strconv.Atoi(raw)
+	if err != nil || workers <= 0 {
+		log.Printf("ignoring invalid EAFT_WORKERS=%q", raw)
+		return nil
+	}
+	log.Printf("EAFT_WORKERS=%d", workers)
+	return make(chan struct{}, workers)
+}
+
+func acquireWorker() func() {
+	if workerSemaphore == nil {
+		return func() {}
+	}
+	workerSemaphore <- struct{}{}
+	return func() {
+		<-workerSemaphore
+	}
 }
 
 func checkCorrectness(cmd string, id string, app string) (bool, string) {

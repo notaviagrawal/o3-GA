@@ -14,6 +14,11 @@ func main() {
 	}
 
 	utils.Initialization(os.Args[1])
+	workers := os.Getenv("EAFT_WORKERS")
+	if workers == "" {
+		workers = "unbounded"
+	}
+	fmt.Printf("EAFT_WORKERS=%s\n", workers)
 	switch os.Args[4] {
 	case "GA":
 		scripts.GARunner()
