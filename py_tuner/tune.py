@@ -49,6 +49,11 @@ def main() -> None:
         dataset=args.dataset,
         timeout_seconds=args.timeout,
     )
+    print(
+        f"Building -O0 reference for {args.benchmark} "
+        f"({args.dataset}, {args.compiler})...",
+        flush=True,
+    )
     evaluator.build_reference()
 
     metadata = {
@@ -65,8 +70,13 @@ def main() -> None:
     (run_dir / "metadata.json").write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
 
     best_seen = {"fitness": math.inf, "vector": None}
+    eval_count = {"value": 0}
+    search_started_at = time.time()
+    generation_started_at: dict[int, float] = {}
+    generation_eval_count: dict[int, int] = {}
 
     def fitness_fn(vector: list[int], generation: int, candidate_index: int) -> float:
+        generation_started_at.setdefault(generation, time.time())
         result = evaluator.evaluate(
             vector=vector,
             generation=generation,
@@ -74,6 +84,10 @@ def main() -> None:
             candidate_index=candidate_index,
             repeats=args.repeats,
         )
+        eval_count["value"] += 1
+        generation_eval_count[generation] = generation_eval_count.get(generation, 0) + 1
+        elapsed_search = time.time() - search_started_at
+        elapsed_generation = time.time() - generation_started_at[generation]
         if result.correct and result.runtime < best_seen["fitness"]:
             best_seen["fitness"] = result.runtime
             best_seen["vector"] = vector
@@ -88,8 +102,46 @@ def main() -> None:
                     "candidate_id": result.candidate_id,
                 },
             )
+        append_jsonl(
+            run_dir / "progress.jsonl",
+            {
+                "candidate_id": result.candidate_id,
+                "candidate_index": candidate_index,
+                "correct": result.correct,
+                "elapsed_generation": elapsed_generation,
+                "elapsed_search": elapsed_search,
+                "eval_count": eval_count["value"],
+                "generation": generation,
+                "generation_eval_count": generation_eval_count[generation],
+                "reason": result.reason,
+                "runtime": result.runtime if math.isfinite(result.runtime) else None,
+                "search_started_at": search_started_at,
+                "timestamp": time.time(),
+            },
+        )
+        if result.correct:
+            best_text = f"{best_seen['fitness']:.6f}" if math.isfinite(best_seen["fitness"]) else "n/a"
+            print(
+                f"eval={eval_count['value']:04d} gen={generation:03d} "
+                f"cand={candidate_index:03d} ok runtime={result.runtime:.6f}s "
+                f"best={best_text}s elapsed={elapsed_search:.1f}s",
+                flush=True,
+            )
+        else:
+            print(
+                f"eval={eval_count['value']:04d} gen={generation:03d} "
+                f"cand={candidate_index:03d} fail reason={result.reason} "
+                f"elapsed={elapsed_search:.1f}s",
+                flush=True,
+            )
         return result.runtime if result.correct else math.inf
 
+    print(
+        f"Starting {args.algorithm} search: flags={len(flags)}, "
+        f"generations={args.generations}, pop_size={args.pop_size}, "
+        f"budget={args.budget}, repeats={args.repeats}",
+        flush=True,
+    )
     if args.algorithm == "random":
         opt_result = run_random_search(space, args.budget, fitness_fn, args.seed)
     elif args.algorithm == "ga":
@@ -106,6 +158,8 @@ def main() -> None:
         "best_runtime": opt_result.fitness,
         "best_vector": best_vector,
         "best_flags": best_flags,
+        "evaluations": eval_count["value"],
+        "search_elapsed": time.time() - search_started_at,
     }
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     print(f"Run complete: {run_dir}")
@@ -115,4 +169,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
