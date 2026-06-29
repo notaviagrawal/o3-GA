@@ -9,7 +9,7 @@ import (
 
 func main() {
 	if len(os.Args) < 5 {
-		fmt.Println("usage: go run ./cmd/headless <benchmark> <compiler> <log.json> <GA|PSO>")
+		fmt.Println("usage: go run ./cmd/headless <benchmark> <compiler> <log.json> <GA|PSO|LTGOMEA>")
 		os.Exit(1)
 	}
 
@@ -29,8 +29,10 @@ func main() {
 		scripts.GARunner()
 	case "PSO":
 		scripts.PSORunner()
+	case "LTGOMEA":
+		scripts.LTGOMEARunner()
 	default:
-		fmt.Printf("unknown runner %q, expected GA or PSO\n", os.Args[4])
+		fmt.Printf("unknown runner %q, expected GA, PSO, or LTGOMEA\n", os.Args[4])
 		os.Exit(1)
 	}
 }

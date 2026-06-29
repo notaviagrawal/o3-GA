@@ -22,10 +22,9 @@ func main() {
 
 	// Set the number of generations to run for
 	// Args[1] => Folder name for results
-	// Args[2] => GCC-11	
+	// Args[2] => GCC-11
 	// Args[3] => 2mm.json -> Result file.
 	// Args[4] => GA or PSO
-
 
 	// Example full run -> go run main.go 2mm gcc-11 2mm.json GA
 
@@ -34,6 +33,8 @@ func main() {
 		go scripts.GARunner()
 	} else if Runner == "PSO" {
 		go scripts.PSORunner()
+	} else if Runner == "LTGOMEA" {
+		go scripts.LTGOMEARunner()
 	}
 	utils.CLI()
 }
