@@ -19,6 +19,11 @@ func main() {
 		workers = "unbounded"
 	}
 	fmt.Printf("EAFT_WORKERS=%s\n", workers)
+	correctness := os.Getenv("EAFT_CORRECTNESS")
+	if correctness == "" {
+		correctness = "off"
+	}
+	fmt.Printf("EAFT_CORRECTNESS=%s\n", correctness)
 	switch os.Args[4] {
 	case "GA":
 		scripts.GARunner()
