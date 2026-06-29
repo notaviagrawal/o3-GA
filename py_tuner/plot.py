@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 
@@ -108,12 +109,81 @@ def main() -> None:
         plt.savefig(plots_dir / "generation_runtime_stats.png", dpi=160)
         plt.close()
 
+    _plot_search_projection(df, plots_dir)
+
     summary_path = run_dir / "summary.json"
     if summary_path.exists():
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         (plots_dir / "best_flags.txt").write_text(" ".join(summary["best_flags"]) + "\n", encoding="utf-8")
 
     print(f"Plots written to {plots_dir}")
+
+
+def _plot_search_projection(df: pd.DataFrame, plots_dir: Path) -> None:
+    if "vector" not in df.columns or len(df) < 3:
+        return
+
+    vectors = []
+    rows = []
+    for row in df.itertuples(index=False):
+        vector = getattr(row, "vector", None)
+        if isinstance(vector, list) and vector:
+            vectors.append([float(v) for v in vector])
+            rows.append(row)
+    if len(vectors) < 3:
+        return
+
+    matrix = np.asarray(vectors, dtype=float)
+    if matrix.ndim != 2 or matrix.shape[1] < 2:
+        return
+
+    centered = matrix - matrix.mean(axis=0, keepdims=True)
+    try:
+        _, _, vh = np.linalg.svd(centered, full_matrices=False)
+    except np.linalg.LinAlgError:
+        return
+    projection = centered @ vh[:2].T
+
+    proj_df = pd.DataFrame(
+        {
+            "pc1": projection[:, 0],
+            "pc2": projection[:, 1],
+            "generation": [getattr(row, "generation") for row in rows],
+            "runtime": pd.to_numeric([getattr(row, "runtime") for row in rows], errors="coerce"),
+            "correct": [bool(getattr(row, "correct")) for row in rows],
+        }
+    )
+    correct_proj = proj_df[proj_df["correct"]].copy()
+    best_proj = correct_proj.nsmallest(min(10, len(correct_proj)), "runtime") if not correct_proj.empty else correct_proj
+
+    plt.figure(figsize=(8, 7))
+    scatter = plt.scatter(
+        proj_df["pc1"],
+        proj_df["pc2"],
+        c=proj_df["generation"],
+        cmap="viridis",
+        alpha=0.55,
+        s=38,
+        edgecolors="none",
+    )
+    if not best_proj.empty:
+        plt.scatter(
+            best_proj["pc1"],
+            best_proj["pc2"],
+            facecolors="none",
+            edgecolors="#d62728",
+            linewidths=1.8,
+            s=95,
+            label="top candidates",
+        )
+        plt.legend()
+    plt.colorbar(scatter, label="Generation")
+    plt.title("Search Space Projection")
+    plt.xlabel("Principal component 1")
+    plt.ylabel("Principal component 2")
+    plt.tight_layout()
+    plt.savefig(plots_dir / "search_projection.png", dpi=160)
+    plt.close()
 
 
 if __name__ == "__main__":
