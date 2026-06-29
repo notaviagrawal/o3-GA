@@ -46,16 +46,19 @@ type mixingEvent struct {
 }
 
 type ltSummary struct {
-	Algorithm       string   `json:"algorithm"`
-	BestFlags       []string `json:"best_flags"`
-	BestFitness     float64  `json:"best_fitness"`
-	Budget          int      `json:"budget"`
-	Evaluations     uint64   `json:"evaluations"`
-	Generations     int      `json:"generations"`
-	GroupTries      int      `json:"group_tries"`
-	PopulationSize  int      `json:"population_size"`
-	Seed            int64    `json:"seed"`
-	SearchElapsedMs int64    `json:"search_elapsed_ms"`
+	Algorithm        string   `json:"algorithm"`
+	BestFlags        []string `json:"best_flags"`
+	BestFitness      float64  `json:"best_fitness"`
+	Budget           int      `json:"budget"`
+	CorrectnessMode  string   `json:"correctness_mode"`
+	Evaluations      uint64   `json:"evaluations"`
+	Generations      int      `json:"generations"`
+	GroupTries       int      `json:"group_tries"`
+	IncorrectPenalty float64  `json:"incorrect_penalty_seconds,omitempty"`
+	PopulationSize   int      `json:"population_size"`
+	SafeFlagsLocked  bool     `json:"safe_flags_locked"`
+	Seed             int64    `json:"seed"`
+	SearchElapsedMs  int64    `json:"search_elapsed_ms"`
 }
 
 func LTGOMEARunner() {
@@ -91,11 +94,13 @@ func LTGOMEARunner() {
 	}
 
 	fmt.Printf(
-		"ltgomea init pop=%d generations=%d budget=%d group_tries=%d best=%.6fs elapsed=%.1fs\n",
+		"ltgomea init pop=%d generations=%d budget=%d group_tries=%d correctness=%s safe_flags_locked=%t best=%.6fs elapsed=%.1fs\n",
 		popSize,
 		generations,
 		budget,
 		groupTries,
+		getCorrectnessMode(),
+		lockSafeFlags(),
 		best.Fitness,
 		time.Since(start).Seconds(),
 	)
@@ -120,6 +125,7 @@ func LTGOMEARunner() {
 				if !changed {
 					continue
 				}
+				trial = constrainedVector(trial)
 				tries++
 				oldFitness := population[i].Fitness
 				oldVector := cloneVector(population[i].Vector)
@@ -165,16 +171,19 @@ func LTGOMEARunner() {
 
 	bestFlags := vectorToFlagList(best.Vector)
 	summary := ltSummary{
-		Algorithm:       "LTGOMEA",
-		BestFlags:       bestFlags,
-		BestFitness:     best.Fitness,
-		Budget:          budget,
-		Evaluations:     atomicEvalCount(),
-		Generations:     generations,
-		GroupTries:      groupTries,
-		PopulationSize:  popSize,
-		Seed:            seed,
-		SearchElapsedMs: time.Since(start).Milliseconds(),
+		Algorithm:        "LTGOMEA",
+		BestFlags:        bestFlags,
+		BestFitness:      best.Fitness,
+		Budget:           budget,
+		CorrectnessMode:  getCorrectnessMode(),
+		Evaluations:      atomicEvalCount(),
+		Generations:      generations,
+		GroupTries:       groupTries,
+		IncorrectPenalty: incorrectPenaltySeconds(),
+		PopulationSize:   popSize,
+		SafeFlagsLocked:  lockSafeFlags(),
+		Seed:             seed,
+		SearchElapsedMs:  time.Since(start).Milliseconds(),
 	}
 	payload, _ := json.MarshalIndent(summary, "", "  ")
 	_ = os.WriteFile(filepath.Join(utils.ResultsPath, os.Args[1], "log", "ltgomea_summary.json"), payload, 0666)
@@ -183,6 +192,7 @@ func LTGOMEARunner() {
 }
 
 func evaluateLTVector(vector Vector, cache map[string]float64) float64 {
+	vector = constrainedVector(vector)
 	key := vectorKey(vector)
 	if fitness, ok := cache[key]; ok {
 		return fitness
@@ -196,7 +206,7 @@ func evaluateLTVector(vector Vector, cache map[string]float64) float64 {
 }
 
 func randomLTVector(rng *rand.Rand) Vector {
-	return Vector(InitBinaryFloat64(50, 0, 2, rng))
+	return constrainedVector(Vector(InitBinaryFloat64(50, 0, 2, rng)))
 }
 
 func vectorKey(vector Vector) string {

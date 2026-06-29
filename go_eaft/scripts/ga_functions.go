@@ -42,6 +42,7 @@ type evalLogEntry struct {
 	CorrectSeconds  float64   `json:"correct_seconds"`
 	CorrectnessMode string    `json:"correctness_mode"`
 	EvalIndex       uint64    `json:"eval_index"`
+	FitnessSeconds  *float64  `json:"fitness_seconds,omitempty"`
 	IsBaseline      bool      `json:"is_baseline"`
 	OutputPath      string    `json:"output_path"`
 	Reason          string    `json:"reason,omitempty"`
@@ -146,12 +147,16 @@ func CompileCode(cmd string, id string, count int) (Total float64) {
 	correctnessMode := getCorrectnessMode()
 	var correct *bool
 	correctSeconds := 0.0
-	if correctnessMode == "exact" {
+	correctReason := ""
+	if correctnessMode == "exact" || correctnessMode == "metric" {
 		correctStarted := time.Now()
-		isCorrect, correctReason := checkCorrectness(cmd, id, app)
+		isCorrect, reason := checkCorrectness(cmd, id, app)
 		correctSeconds = time.Since(correctStarted).Seconds()
 		correct = boolPtr(isCorrect)
 		if !isCorrect {
+			correctReason = reason
+		}
+		if !isCorrect && correctnessMode == "exact" {
 			Total = math.Inf(10)
 			writeEvalLog(evalLogEntry{
 				Algorithm:       currentAlgorithm(),
@@ -165,7 +170,7 @@ func CompileCode(cmd string, id string, count int) (Total float64) {
 				EvalIndex:       evalIndex,
 				IsBaseline:      isBaselineCommand(cmd),
 				OutputPath:      exec_file,
-				Reason:          correctReason,
+				Reason:          reason,
 				RuntimeSeconds:  runtimePtr(Total),
 				Status:          correctReason,
 				Timestamp:       time.Now().Format(time.RFC3339Nano),
@@ -241,7 +246,11 @@ func CompileCode(cmd string, id string, count int) (Total float64) {
 		}
 	}
 	// CALC AVERAGE OF TOTAL RUN TIME
-	Total = TotalExecTime / float64(count)
+	rawRuntime := TotalExecTime / float64(count)
+	Total = rawRuntime
+	if correctnessMode == "metric" && correct != nil && !*correct {
+		Total += incorrectPenaltySeconds()
+	}
 	writeEvalLog(evalLogEntry{
 		Algorithm:       currentAlgorithm(),
 		Benchmark:       os.Args[1],
@@ -253,9 +262,11 @@ func CompileCode(cmd string, id string, count int) (Total float64) {
 		CorrectSeconds:  correctSeconds,
 		CorrectnessMode: correctnessMode,
 		EvalIndex:       evalIndex,
+		FitnessSeconds:  runtimePtr(Total),
 		IsBaseline:      isBaselineCommand(cmd),
 		OutputPath:      exec_file,
-		RuntimeSeconds:  runtimePtr(Total),
+		Reason:          correctReason,
+		RuntimeSeconds:  runtimePtr(rawRuntime),
 		RunSeconds:      runSeconds,
 		Status:          "ok",
 		Timestamp:       time.Now().Format(time.RFC3339Nano),
@@ -269,11 +280,24 @@ func getCorrectnessMode() string {
 	if mode == "" {
 		return "off"
 	}
-	if mode != "off" && mode != "exact" {
+	if mode != "off" && mode != "exact" && mode != "metric" {
 		log.Printf("ignoring invalid EAFT_CORRECTNESS=%q, using off", mode)
 		return "off"
 	}
 	return mode
+}
+
+func incorrectPenaltySeconds() float64 {
+	raw := os.Getenv("EAFT_INCORRECT_PENALTY")
+	if raw == "" {
+		return 100.0
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || value <= 0 {
+		log.Printf("ignoring invalid EAFT_INCORRECT_PENALTY=%q, using 100", raw)
+		return 100.0
+	}
+	return value
 }
 
 func boolPtr(value bool) *bool {
@@ -448,6 +472,10 @@ func printEvalUpdate(entry evalLogEntry) {
 	if entry.RuntimeSeconds != nil {
 		runtimeText = fmt.Sprintf("%.6f", *entry.RuntimeSeconds)
 	}
+	fitnessText := runtimeText
+	if entry.FitnessSeconds != nil {
+		fitnessText = fmt.Sprintf("%.6f", *entry.FitnessSeconds)
+	}
 	label := "candidate"
 	if entry.IsBaseline {
 		label = "baseline"
@@ -457,13 +485,14 @@ func printEvalUpdate(entry evalLogEntry) {
 		correctText = fmt.Sprintf("%t", *entry.Correct)
 	}
 	fmt.Printf(
-		"eval=%04d %s status=%s correctness=%s correct=%s runtime=%ss best=%ss elapsed=%.1fs\n",
+		"eval=%04d %s status=%s correctness=%s correct=%s runtime=%ss fitness=%ss best_correct=%ss elapsed=%.1fs\n",
 		entry.EvalIndex,
 		label,
 		entry.Status,
 		entry.CorrectnessMode,
 		correctText,
 		runtimeText,
+		fitnessText,
 		bestText,
 		time.Since(searchStartedAt).Seconds(),
 	)

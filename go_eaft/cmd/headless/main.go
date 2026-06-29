@@ -24,6 +24,16 @@ func main() {
 		correctness = "off"
 	}
 	fmt.Printf("EAFT_CORRECTNESS=%s\n", correctness)
+	safeFlags := os.Getenv("EAFT_LOCK_SAFE_FLAGS")
+	if safeFlags == "" {
+		safeFlags = "off"
+	}
+	fmt.Printf("EAFT_LOCK_SAFE_FLAGS=%s\n", safeFlags)
+	penalty := os.Getenv("EAFT_INCORRECT_PENALTY")
+	if penalty == "" {
+		penalty = "100"
+	}
+	fmt.Printf("EAFT_INCORRECT_PENALTY=%s\n", penalty)
 	dataset := os.Getenv("EAFT_DATASET")
 	if dataset == "" {
 		dataset = "polybench_default"

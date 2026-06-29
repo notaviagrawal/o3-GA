@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"path"
+	"strings"
 
 	"github.com/MaxHalford/eaopt"
 	uuid "github.com/satori/go.uuid"
@@ -17,6 +18,15 @@ type Vector []float64
 
 var availableFlags []string = tools.Flags
 
+var safeFlagOverrides = map[string]float64{
+	"allow-store-data-races": 0,
+	"associative-math":       0,
+	"cx-limited-range":       0,
+	"fast-math":              0,
+	"finite-math-only":       0,
+	"fp-int-builtin-inexact": 0,
+}
+
 // TODO : Change static optimization level with Dynamic one.
 func MatchBinaryWithFlags(X Vector, OptLevel string) (string, map[string]int) {
 	// First collect all available Flags
@@ -25,6 +35,9 @@ func MatchBinaryWithFlags(X Vector, OptLevel string) (string, map[string]int) {
 	flag_map := map[string]int{}
 	for i, v := range X {
 		vv := v
+		if i < len(availableFlags) {
+			vv = constrainedFlagValue(availableFlags[i], vv)
+		}
 		if math.IsNaN(vv) || math.IsInf(vv, 0) {
 			vv = 0
 		}
@@ -51,8 +64,41 @@ func addPolybenchDependencies(command string, problem string, out_file string) s
 	return command
 }
 
+func constrainedVector(vector Vector) Vector {
+	out := make(Vector, len(vector))
+	copy(out, vector)
+	if !lockSafeFlags() {
+		return out
+	}
+	for i, name := range availableFlags {
+		if i >= len(out) {
+			break
+		}
+		if value, ok := safeFlagOverrides[name]; ok {
+			out[i] = value
+		}
+	}
+	return out
+}
+
+func constrainedFlagValue(name string, value float64) float64 {
+	if !lockSafeFlags() {
+		return value
+	}
+	if safeValue, ok := safeFlagOverrides[name]; ok {
+		return safeValue
+	}
+	return value
+}
+
+func lockSafeFlags() bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv("EAFT_LOCK_SAFE_FLAGS")))
+	return raw == "1" || raw == "true" || raw == "yes" || raw == "on"
+}
+
 // Fitness function burasi
 func (X Vector) Evaluate() (float64, error) {
+	X = constrainedVector(X)
 	// Changing Binary Array to GCC command with corresponding open / close flag
 	output := uuid.NewV4().String()
 	cmd, _ := MatchBinaryWithFlags(X, "O3")

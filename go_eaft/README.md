@@ -22,6 +22,8 @@ Run the seeded linkage-tree GOMEA-style search:
 EAFT_WORKERS=6 LTGOMEA_BUDGET=1600 go run ./cmd/headless 2mm gcc ltgomea.json LTGOMEA
 ```
 
-By default, search uses EAFT-style unsafe whole-process timing. Use `EAFT_CORRECTNESS=exact` only when you want exact dump-output correctness inside the search loop; the faster workflow is to run unsafe search first and scan top candidates for correctness afterward.
+By default, search uses EAFT-style unsafe whole-process timing. Use `EAFT_CORRECTNESS=exact` to reject wrong-output candidates immediately, or `EAFT_CORRECTNESS=metric` to log raw runtime while adding `EAFT_INCORRECT_PENALTY` seconds to the candidate fitness when the dump-output check fails.
+
+For exact PolyBench output searches, `EAFT_LOCK_SAFE_FLAGS=1` forces known semantic-risk flags such as `fast-math`, `associative-math`, and `finite-math-only` off. This keeps the search from repeatedly rediscovering very fast but wrong-output floating-point configurations.
 
 LT-GOMEA writes `results/<benchmark>/log/mixing_events.jsonl`, which records each attempted group mix, the donor/target, changed flags, seeded-vs-learned group source, runtime delta, and whether the change was accepted.
