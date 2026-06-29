@@ -22,6 +22,9 @@ import (
 
 var evalCounter uint64
 var evalLogMu sync.Mutex
+var evalPrintMu sync.Mutex
+var searchStartedAt = time.Now()
+var bestRuntime = math.Inf(1)
 var referenceOnce sync.Once
 var referenceDump []byte
 var referenceErr error
@@ -39,7 +42,7 @@ type evalLogEntry struct {
 	IsBaseline     bool      `json:"is_baseline"`
 	OutputPath     string    `json:"output_path"`
 	Reason         string    `json:"reason,omitempty"`
-	RuntimeSeconds float64   `json:"runtime_seconds"`
+	RuntimeSeconds *float64  `json:"runtime_seconds,omitempty"`
 	RunSeconds     []float64 `json:"run_seconds"`
 	Status         string    `json:"status"`
 	Timestamp      string    `json:"timestamp"`
@@ -89,6 +92,13 @@ func GARunner() {
 			fmt.Println(err)
 		}
 		f.WriteString(string(bytes) + "\n")
+		fmt.Printf(
+			"generation=%03d best=%.6fs progress=%.1f%% elapsed=%.1fs\n",
+			ga.Generations,
+			ga.HallOfFame[0].Fitness,
+			utils.Progress,
+			time.Since(searchStartedAt).Seconds(),
+		)
 	}
 
 	// Find the minimum
@@ -144,7 +154,7 @@ func CompileCode(cmd string, id string, count int) (Total float64) {
 			IsBaseline:     isBaselineCommand(cmd),
 			OutputPath:     exec_file,
 			Reason:         correctReason,
-			RuntimeSeconds: Total,
+			RuntimeSeconds: runtimePtr(Total),
 			Status:         correctReason,
 			Timestamp:      time.Now().Format(time.RFC3339Nano),
 		})
@@ -172,7 +182,7 @@ func CompileCode(cmd string, id string, count int) (Total float64) {
 			IsBaseline:     isBaselineCommand(cmd),
 			OutputPath:     exec_file,
 			Reason:         "compile_failed",
-			RuntimeSeconds: Total,
+			RuntimeSeconds: runtimePtr(Total),
 			Status:         "compile_failed",
 			Timestamp:      time.Now().Format(time.RFC3339Nano),
 		})
@@ -207,7 +217,7 @@ func CompileCode(cmd string, id string, count int) (Total float64) {
 				IsBaseline:     isBaselineCommand(cmd),
 				OutputPath:     exec_file,
 				Reason:         "run_failed",
-				RuntimeSeconds: Total,
+				RuntimeSeconds: runtimePtr(Total),
 				RunSeconds:     runSeconds,
 				Status:         "run_failed",
 				Timestamp:      time.Now().Format(time.RFC3339Nano),
@@ -229,7 +239,7 @@ func CompileCode(cmd string, id string, count int) (Total float64) {
 		EvalIndex:      evalIndex,
 		IsBaseline:     isBaselineCommand(cmd),
 		OutputPath:     exec_file,
-		RuntimeSeconds: Total,
+		RuntimeSeconds: runtimePtr(Total),
 		RunSeconds:     runSeconds,
 		Status:         "ok",
 		Timestamp:      time.Now().Format(time.RFC3339Nano),
@@ -337,6 +347,7 @@ func writeEvalLog(entry evalLogEntry) {
 	logPath := filepath.Join(utils.ResultsPath, os.Args[1], "log", "evaluations.jsonl")
 	payload, err := json.Marshal(entry)
 	if err != nil {
+		log.Print(err)
 		return
 	}
 	evalLogMu.Lock()
@@ -347,4 +358,46 @@ func writeEvalLog(entry evalLogEntry) {
 	}
 	defer f.Close()
 	_, _ = f.WriteString(string(payload) + "\n")
+	printEvalUpdate(entry)
+}
+
+func runtimePtr(value float64) *float64 {
+	if math.IsInf(value, 0) || math.IsNaN(value) {
+		return nil
+	}
+	return &value
+}
+
+func printEvalUpdate(entry evalLogEntry) {
+	evalPrintMu.Lock()
+	defer evalPrintMu.Unlock()
+
+	bestText := "n/a"
+	if entry.Correct && entry.Status == "ok" && entry.RuntimeSeconds != nil {
+		if *entry.RuntimeSeconds < bestRuntime {
+			bestRuntime = *entry.RuntimeSeconds
+		}
+	}
+	if !math.IsInf(bestRuntime, 0) && !math.IsNaN(bestRuntime) {
+		bestText = fmt.Sprintf("%.6f", bestRuntime)
+	}
+
+	runtimeText := "n/a"
+	if entry.RuntimeSeconds != nil {
+		runtimeText = fmt.Sprintf("%.6f", *entry.RuntimeSeconds)
+	}
+	label := "candidate"
+	if entry.IsBaseline {
+		label = "baseline"
+	}
+	fmt.Printf(
+		"eval=%04d %s status=%s correct=%t runtime=%ss best=%ss elapsed=%.1fs\n",
+		entry.EvalIndex,
+		label,
+		entry.Status,
+		entry.Correct,
+		runtimeText,
+		bestText,
+		time.Since(searchStartedAt).Seconds(),
+	)
 }
