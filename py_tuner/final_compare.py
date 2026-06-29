@@ -1,7 +1,6 @@
-from __future__ import annotations
-
 import argparse
 import json
+import statistics
 import shutil
 import subprocess
 from pathlib import Path
@@ -54,6 +53,14 @@ def main() -> None:
 
     comparison_dir = run_dir / "final_compare"
     comparison_dir.mkdir(exist_ok=True)
+    polybench_records = _polybench_timings(binaries, runs=args.runs, warmup=args.warmup)
+    _write_comparison_chart(
+        records=polybench_records,
+        output_csv=comparison_dir / "polybench_comparison.csv",
+        output_png=comparison_dir / "polybench_comparison.png",
+        title="Final PolyBench Kernel Runtime",
+    )
+
     hyperfine = shutil.which("hyperfine")
     if hyperfine:
         export_path = comparison_dir / "hyperfine.json"
@@ -71,7 +78,7 @@ def main() -> None:
         records = _read_hyperfine(export_path, binaries)
         title = "Final Hyperfine Process Runtime"
     else:
-        records = _fallback_polybench_timings(binaries)
+        records = polybench_records
         (comparison_dir / "README.txt").write_text(
             "hyperfine was not found on PATH, so this comparison uses each binary's PolyBench-reported kernel time instead.\n"
             "Install hyperfine and rerun this command for external process-level confirmation.\n",
@@ -79,18 +86,12 @@ def main() -> None:
         )
         title = "Final PolyBench Kernel Runtime"
 
-    df = pd.DataFrame(records)
-    df.to_csv(comparison_dir / "comparison.csv", index=False)
-
-    sns.set_theme(style="whitegrid")
-    plt.figure(figsize=(9, 5))
-    sns.barplot(data=df, x="label", y="mean_seconds")
-    plt.title(title)
-    plt.xlabel("Build")
-    plt.ylabel("Mean seconds")
-    plt.tight_layout()
-    plt.savefig(comparison_dir / "comparison.png", dpi=160)
-    plt.close()
+    _write_comparison_chart(
+        records=records,
+        output_csv=comparison_dir / "comparison.csv",
+        output_png=comparison_dir / "comparison.png",
+        title=title,
+    )
     print(f"Final comparison written to {comparison_dir}")
 
 
@@ -111,23 +112,54 @@ def _read_hyperfine(export_path: Path, binaries: dict[str, Path]) -> list[dict[s
     return rows
 
 
-def _fallback_polybench_timings(binaries: dict[str, Path]) -> list[dict[str, float | str]]:
+def _polybench_timings(binaries: dict[str, Path], runs: int, warmup: int) -> list[dict[str, float | str]]:
     rows = []
     for label, binary in binaries.items():
-        proc = subprocess.run([str(binary)], check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        value = None
-        for line in proc.stdout.splitlines():
-            try:
-                value = float(line.strip())
-                break
-            except ValueError:
-                continue
-        if value is None:
-            raise RuntimeError(f"Could not parse PolyBench time for {label}: {proc.stdout!r}")
-        rows.append({"label": label, "mean_seconds": value, "stddev_seconds": 0.0, "source": "polybench"})
+        values = []
+        for i in range(warmup + runs):
+            value = _run_polybench_binary(label, binary)
+            if i >= warmup:
+                values.append(value)
+        rows.append(
+            {
+                "label": label,
+                "mean_seconds": statistics.mean(values),
+                "stddev_seconds": statistics.stdev(values) if len(values) > 1 else 0.0,
+                "source": "polybench",
+            }
+        )
     return rows
+
+
+def _run_polybench_binary(label: str, binary: Path) -> float:
+    proc = subprocess.run([str(binary)], check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    for line in proc.stdout.splitlines():
+        try:
+            return float(line.strip())
+        except ValueError:
+            continue
+    raise RuntimeError(f"Could not parse PolyBench time for {label}: {proc.stdout!r}")
+
+
+def _write_comparison_chart(
+    records: list[dict[str, float | str]],
+    output_csv: Path,
+    output_png: Path,
+    title: str,
+) -> None:
+    df = pd.DataFrame(records)
+    df.to_csv(output_csv, index=False)
+
+    sns.set_theme(style="whitegrid")
+    plt.figure(figsize=(9, 5))
+    sns.barplot(data=df, x="label", y="mean_seconds")
+    plt.title(title)
+    plt.xlabel("Build")
+    plt.ylabel("Mean seconds")
+    plt.tight_layout()
+    plt.savefig(output_png, dpi=160)
+    plt.close()
 
 
 if __name__ == "__main__":
     main()
-
