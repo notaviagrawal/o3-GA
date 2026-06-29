@@ -21,6 +21,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--compiler", default="gcc-11")
     parser.add_argument("--dataset", default="MINI_DATASET", choices=["MINI_DATASET", "SMALL_DATASET", "MEDIUM_DATASET", "LARGE_DATASET", "EXTRALARGE_DATASET"])
     parser.add_argument("--flags", type=int, default=50, help="Number of GCC optimizer flags to use")
+    parser.add_argument(
+        "--fixed-base",
+        choices=["O1", "O2", "O3", "Ofast"],
+        help="Force every candidate to use this base optimization level before its -f/-fno flags",
+    )
     parser.add_argument("--budget", type=int, default=20, help="Random-search evaluations")
     parser.add_argument("--generations", type=int, default=5)
     parser.add_argument("--pop-size", type=int, default=8)
@@ -37,7 +42,8 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     compiler = require_tool(args.compiler)
     flags = discover_optimizer_flags(compiler, args.flags)
-    space = FlagSpace(base_levels=DEFAULT_BASE_LEVELS, flags=flags)
+    base_levels = (args.fixed_base,) if args.fixed_base else DEFAULT_BASE_LEVELS
+    space = FlagSpace(base_levels=base_levels, flags=flags)
 
     run_id = time.strftime("%Y%m%d-%H%M%S")
     run_dir = repo_root / args.results_dir / args.benchmark / f"{run_id}-{args.algorithm}"
@@ -64,9 +70,10 @@ def main() -> None:
         "benchmark": args.benchmark,
         "compiler": compiler,
         "dataset": args.dataset,
+        "fixed_base": args.fixed_base,
         "flag_count": len(flags),
         "flags": list(flags),
-        "base_levels": list(DEFAULT_BASE_LEVELS),
+        "base_levels": list(base_levels),
         "run_dir": str(run_dir),
         "seed": args.seed,
         "workers": args.workers,
@@ -145,6 +152,7 @@ def main() -> None:
 
     print(
         f"Starting {args.algorithm} search: flags={len(flags)}, "
+        f"base_levels={','.join(base_levels)}, "
         f"generations={args.generations}, pop_size={args.pop_size}, "
         f"budget={args.budget}, repeats={args.repeats}, workers={args.workers}",
         flush=True,

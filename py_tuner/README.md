@@ -29,6 +29,12 @@ Run GA:
 python3 -m py_tuner.tune --benchmark 2mm --algorithm ga --budget 80 --generations 10 --pop-size 8 --dataset MINI_DATASET --flags 50
 ```
 
+Run GA in the original EAFT style, forcing every candidate to start from `-O3`:
+
+```bash
+python3 -m py_tuner.tune --benchmark 2mm --algorithm ga --generations 40 --pop-size 40 --dataset LARGE_DATASET --flags 50 --fixed-base O3
+```
+
 Run PSO:
 
 ```bash
@@ -46,4 +52,3 @@ Final Hyperfine comparison, if `hyperfine` is installed:
 ```bash
 python3 -m py_tuner.final_compare --run-dir py_results/2mm/<run-id>
 ```
-
