@@ -23,3 +23,5 @@ EAFT_WORKERS=6 LTGOMEA_BUDGET=1600 go run ./cmd/headless 2mm gcc ltgomea.json LT
 ```
 
 By default, search uses EAFT-style unsafe whole-process timing. Use `EAFT_CORRECTNESS=exact` only when you want exact dump-output correctness inside the search loop; the faster workflow is to run unsafe search first and scan top candidates for correctness afterward.
+
+LT-GOMEA writes `results/<benchmark>/log/mixing_events.jsonl`, which records each attempted group mix, the donor/target, changed flags, seeded-vs-learned group source, runtime delta, and whether the change was accepted.

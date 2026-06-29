@@ -22,6 +22,29 @@ type ltIndividual struct {
 	Fitness float64
 }
 
+type mixingGroup struct {
+	Indices []int
+	Name    string
+	Source  string
+}
+
+type mixingEvent struct {
+	Accepted     bool     `json:"accepted"`
+	ChangedFlags []string `json:"changed_flags"`
+	Delta        *float64 `json:"delta_seconds,omitempty"`
+	DonorIndex   int      `json:"donor_index"`
+	Evaluation   uint64   `json:"evaluation"`
+	Generation   int      `json:"generation"`
+	GroupIndices []int    `json:"group_indices"`
+	GroupName    string   `json:"group_name"`
+	GroupSize    int      `json:"group_size"`
+	GroupSource  string   `json:"group_source"`
+	NewFitness   float64  `json:"new_fitness"`
+	OldFitness   float64  `json:"old_fitness"`
+	TargetIndex  int      `json:"target_index"`
+	Timestamp    string   `json:"timestamp"`
+}
+
 type ltSummary struct {
 	Algorithm       string   `json:"algorithm"`
 	BestFlags       []string `json:"best_flags"`
@@ -93,18 +116,38 @@ func LTGOMEARunner() {
 					donorIndex = (donorIndex + 1) % len(population)
 				}
 				trial := cloneVector(population[i].Vector)
-				changed := copyGroup(trial, population[donorIndex].Vector, group)
+				changed := copyGroup(trial, population[donorIndex].Vector, group.Indices)
 				if !changed {
 					continue
 				}
 				tries++
+				oldFitness := population[i].Fitness
+				oldVector := cloneVector(population[i].Vector)
+				changedFlags := changedFlagNames(oldVector, trial, group.Indices)
 				fitness := evaluateLTVector(trial, cache)
-				if fitness <= population[i].Fitness {
+				accepted := fitness <= oldFitness
+				if accepted {
 					population[i] = ltIndividual{Vector: trial, Fitness: fitness}
 					if fitness < best.Fitness {
 						best = cloneLTIndividual(population[i])
 					}
 				}
+				writeMixingEvent(mixingEvent{
+					Accepted:     accepted,
+					ChangedFlags: changedFlags,
+					Delta:        finiteDelta(oldFitness, fitness),
+					DonorIndex:   donorIndex,
+					Evaluation:   atomicEvalCount(),
+					Generation:   generation + 1,
+					GroupIndices: append([]int{}, group.Indices...),
+					GroupName:    group.Name,
+					GroupSize:    len(group.Indices),
+					GroupSource:  group.Source,
+					NewFitness:   fitness,
+					OldFitness:   oldFitness,
+					TargetIndex:  i,
+					Timestamp:    time.Now().Format(time.RFC3339Nano),
+				})
 			}
 		}
 		sort.Slice(population, func(i, j int) bool { return population[i].Fitness < population[j].Fitness })
@@ -207,11 +250,11 @@ func vectorToFlagList(vector Vector) []string {
 	return flags
 }
 
-func buildMixingGroups(population []ltIndividual, rng *rand.Rand) [][]int {
+func buildMixingGroups(population []ltIndividual, rng *rand.Rand) []mixingGroup {
 	dimensions := len(population[0].Vector)
-	var groups [][]int
+	var groups []mixingGroup
 	for i := 0; i < dimensions; i++ {
-		groups = append(groups, []int{i})
+		groups = append(groups, mixingGroup{Indices: []int{i}, Name: flagName(i), Source: "single"})
 	}
 	groups = append(groups, seededFlagGroups(dimensions)...)
 	groups = append(groups, learnedLinkageTree(population)...)
@@ -222,7 +265,7 @@ func buildMixingGroups(population []ltIndividual, rng *rand.Rand) [][]int {
 	return groups
 }
 
-func seededFlagGroups(dimensions int) [][]int {
+func seededFlagGroups(dimensions int) []mixingGroup {
 	nameToIndex := map[string]int{}
 	for i, name := range availableFlags {
 		if i >= dimensions {
@@ -230,32 +273,35 @@ func seededFlagGroups(dimensions int) [][]int {
 		}
 		nameToIndex[name] = i
 	}
-	names := [][]string{
-		{"fast-math", "associative-math", "finite-math-only", "cx-limited-range", "fp-int-builtin-inexact"},
-		{"gcse", "gcse-after-reload", "gcse-las", "gcse-lm", "gcse-sm", "cse-follow-jumps", "cprop-registers"},
-		{"align-functions", "align-jumps", "align-labels", "align-loops"},
-		{"branch-count-reg", "branch-probabilities", "guess-branch-probability"},
-		{"early-inlining", "devirtualize", "devirtualize-speculatively"},
-		{"dce", "dse", "delete-dead-exceptions", "delete-null-pointer-checks"},
-		{"finite-loops", "aggressive-loop-optimizations", "delayed-branch"},
+	namedGroups := []struct {
+		name  string
+		flags []string
+	}{
+		{"fast_math", []string{"fast-math", "associative-math", "finite-math-only", "cx-limited-range", "fp-int-builtin-inexact"}},
+		{"gcse_cse", []string{"gcse", "gcse-after-reload", "gcse-las", "gcse-lm", "gcse-sm", "cse-follow-jumps", "cprop-registers"}},
+		{"alignment", []string{"align-functions", "align-jumps", "align-labels", "align-loops"}},
+		{"branch", []string{"branch-count-reg", "branch-probabilities", "guess-branch-probability"}},
+		{"inline_devirt", []string{"early-inlining", "devirtualize", "devirtualize-speculatively"}},
+		{"dead_code", []string{"dce", "dse", "delete-dead-exceptions", "delete-null-pointer-checks"}},
+		{"loop_control", []string{"finite-loops", "aggressive-loop-optimizations", "delayed-branch"}},
 	}
-	var groups [][]int
-	for _, groupNames := range names {
+	var groups []mixingGroup
+	for _, namedGroup := range namedGroups {
 		var group []int
-		for _, name := range groupNames {
+		for _, name := range namedGroup.flags {
 			if index, ok := nameToIndex[name]; ok {
 				group = append(group, index)
 			}
 		}
 		if len(group) > 1 {
 			sort.Ints(group)
-			groups = append(groups, group)
+			groups = append(groups, mixingGroup{Indices: group, Name: namedGroup.name, Source: "seeded"})
 		}
 	}
 	return groups
 }
 
-func learnedLinkageTree(population []ltIndividual) [][]int {
+func learnedLinkageTree(population []ltIndividual) []mixingGroup {
 	dimensions := len(population[0].Vector)
 	if dimensions <= 1 {
 		return nil
@@ -265,7 +311,8 @@ func learnedLinkageTree(population []ltIndividual) [][]int {
 	for i := 0; i < dimensions; i++ {
 		clusters[i] = []int{i}
 	}
-	var groups [][]int
+	var groups []mixingGroup
+	mergeID := 0
 	for len(clusters) > 1 {
 		bestI, bestJ := 0, 1
 		bestScore := math.Inf(-1)
@@ -282,7 +329,12 @@ func learnedLinkageTree(population []ltIndividual) [][]int {
 		merged = append(merged, clusters[bestJ]...)
 		sort.Ints(merged)
 		if len(merged) > 1 && len(merged) < dimensions {
-			groups = append(groups, merged)
+			mergeID++
+			groups = append(groups, mixingGroup{
+				Indices: merged,
+				Name:    fmt.Sprintf("learned_%03d", mergeID),
+				Source:  "learned",
+			})
 		}
 		clusters[bestI] = merged
 		clusters = append(clusters[:bestJ], clusters[bestJ+1:]...)
@@ -358,12 +410,12 @@ func averageLinkage(mi [][]float64, a []int, b []int) float64 {
 	return total / float64(count)
 }
 
-func dedupeGroups(groups [][]int, dimensions int) [][]int {
+func dedupeGroups(groups []mixingGroup, dimensions int) []mixingGroup {
 	seen := map[string]bool{}
-	var out [][]int
+	var out []mixingGroup
 	for _, group := range groups {
-		clean := make([]int, 0, len(group))
-		for _, index := range group {
+		clean := make([]int, 0, len(group.Indices))
+		for _, index := range group.Indices {
 			if index >= 0 && index < dimensions {
 				clean = append(clean, index)
 			}
@@ -382,7 +434,8 @@ func dedupeGroups(groups [][]int, dimensions int) [][]int {
 			continue
 		}
 		seen[key] = true
-		out = append(out, clean)
+		group.Indices = clean
+		out = append(out, group)
 	}
 	return out
 }
@@ -398,6 +451,50 @@ func uniqueInts(values []int) []int {
 		}
 	}
 	return out
+}
+
+func changedFlagNames(before Vector, after Vector, group []int) []string {
+	var names []string
+	for _, index := range group {
+		if index < 0 || index >= len(before) || index >= len(after) {
+			continue
+		}
+		if before[index] != after[index] {
+			names = append(names, flagName(index))
+		}
+	}
+	return names
+}
+
+func flagName(index int) string {
+	if index >= 0 && index < len(availableFlags) {
+		return availableFlags[index]
+	}
+	return fmt.Sprintf("flag_%d", index)
+}
+
+func finiteDelta(oldFitness float64, newFitness float64) *float64 {
+	if math.IsInf(oldFitness, 0) || math.IsNaN(oldFitness) || math.IsInf(newFitness, 0) || math.IsNaN(newFitness) {
+		return nil
+	}
+	delta := newFitness - oldFitness
+	return &delta
+}
+
+func writeMixingEvent(event mixingEvent) {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return
+	}
+	path := filepath.Join(utils.ResultsPath, os.Args[1], "log", "mixing_events.jsonl")
+	evalLogMu.Lock()
+	defer evalLogMu.Unlock()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(string(payload) + "\n")
 }
 
 func envInt(name string, fallback int) int {
