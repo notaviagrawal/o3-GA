@@ -39,6 +39,16 @@ func main() {
 		dataset = "polybench_default"
 	}
 	fmt.Printf("EAFT_DATASET=%s\n", dataset)
+	earlyStopPatience := os.Getenv("LTGOMEA_EARLY_STOP_PATIENCE")
+	if earlyStopPatience == "" {
+		earlyStopPatience = "off"
+	}
+	fmt.Printf("LTGOMEA_EARLY_STOP_PATIENCE=%s\n", earlyStopPatience)
+	earlyStopMinDelta := os.Getenv("LTGOMEA_EARLY_STOP_MIN_DELTA")
+	if earlyStopMinDelta == "" {
+		earlyStopMinDelta = "0.005"
+	}
+	fmt.Printf("LTGOMEA_EARLY_STOP_MIN_DELTA=%s\n", earlyStopMinDelta)
 	switch os.Args[4] {
 	case "GA":
 		scripts.GARunner()

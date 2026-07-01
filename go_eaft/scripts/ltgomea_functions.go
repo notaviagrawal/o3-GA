@@ -46,19 +46,25 @@ type mixingEvent struct {
 }
 
 type ltSummary struct {
-	Algorithm        string   `json:"algorithm"`
-	BestFlags        []string `json:"best_flags"`
-	BestFitness      float64  `json:"best_fitness"`
-	Budget           int      `json:"budget"`
-	CorrectnessMode  string   `json:"correctness_mode"`
-	Evaluations      uint64   `json:"evaluations"`
-	Generations      int      `json:"generations"`
-	GroupTries       int      `json:"group_tries"`
-	IncorrectPenalty float64  `json:"incorrect_penalty_seconds,omitempty"`
-	PopulationSize   int      `json:"population_size"`
-	SafeFlagsLocked  bool     `json:"safe_flags_locked"`
-	Seed             int64    `json:"seed"`
-	SearchElapsedMs  int64    `json:"search_elapsed_ms"`
+	Algorithm           string   `json:"algorithm"`
+	BestFlags           []string `json:"best_flags"`
+	BestFitness         float64  `json:"best_fitness"`
+	Budget              int      `json:"budget"`
+	CorrectnessMode     string   `json:"correctness_mode"`
+	EarlyStopped        bool     `json:"early_stopped"`
+	EarlyStopMinDelta   float64  `json:"early_stop_min_delta_fraction"`
+	EarlyStopPatience   int      `json:"early_stop_patience_evals"`
+	Evaluations         uint64   `json:"evaluations"`
+	Generations         int      `json:"generations"`
+	GenerationsDone     int      `json:"generations_done"`
+	GroupTries          int      `json:"group_tries"`
+	IncorrectPenalty    float64  `json:"incorrect_penalty_seconds,omitempty"`
+	LastImprovementEval uint64   `json:"last_significant_improvement_eval"`
+	PopulationSize      int      `json:"population_size"`
+	SafeFlagsLocked     bool     `json:"safe_flags_locked"`
+	Seed                int64    `json:"seed"`
+	SearchElapsedMs     int64    `json:"search_elapsed_ms"`
+	StopReason          string   `json:"stop_reason"`
 }
 
 func LTGOMEARunner() {
@@ -69,6 +75,8 @@ func LTGOMEARunner() {
 	generations := envInt("LTGOMEA_GENERATIONS", 50)
 	budget := envInt("LTGOMEA_BUDGET", 1600)
 	groupTries := envInt("LTGOMEA_GROUP_TRIES", 4)
+	earlyStopPatience := envInt("LTGOMEA_EARLY_STOP_PATIENCE", 0)
+	earlyStopMinDelta := envFloat("LTGOMEA_EARLY_STOP_MIN_DELTA", 0.005)
 	if budget < popSize {
 		budget = popSize
 	}
@@ -93,12 +101,19 @@ func LTGOMEARunner() {
 		}
 	}
 
+	significantBest := best.Fitness
+	lastImprovementEval := atomicEvalCount()
+	generationsDone := 0
+	stopReason := "generation_limit"
+
 	fmt.Printf(
-		"ltgomea init pop=%d generations=%d budget=%d group_tries=%d correctness=%s safe_flags_locked=%t best=%.6fs elapsed=%.1fs\n",
+		"ltgomea init pop=%d generations=%d budget=%d group_tries=%d early_stop_patience=%d early_stop_min_delta=%.4f correctness=%s safe_flags_locked=%t best=%.6fs elapsed=%.1fs\n",
 		popSize,
 		generations,
 		budget,
 		groupTries,
+		earlyStopPatience,
+		earlyStopMinDelta,
 		getCorrectnessMode(),
 		lockSafeFlags(),
 		best.Fitness,
@@ -136,6 +151,10 @@ func LTGOMEARunner() {
 					population[i] = ltIndividual{Vector: trial, Fitness: fitness}
 					if fitness < best.Fitness {
 						best = cloneLTIndividual(population[i])
+						if isSignificantImprovement(significantBest, best.Fitness, earlyStopMinDelta) {
+							significantBest = best.Fitness
+							lastImprovementEval = atomicEvalCount()
+						}
 					}
 				}
 				writeMixingEvent(mixingEvent{
@@ -157,33 +176,57 @@ func LTGOMEARunner() {
 			}
 		}
 		sort.Slice(population, func(i, j int) bool { return population[i].Fitness < population[j].Fitness })
+		generationsDone = generation + 1
 		fmt.Printf(
-			"ltgomea_generation=%03d best=%.6fs pop_best=%.6fs evals=%d/%d groups=%d elapsed=%.1fs\n",
+			"ltgomea_generation=%03d best=%.6fs pop_best=%.6fs evals=%d/%d no_improve_evals=%d groups=%d elapsed=%.1fs\n",
 			generation+1,
 			best.Fitness,
 			population[0].Fitness,
 			atomicEvalCount(),
 			budget,
+			atomicEvalCount()-lastImprovementEval,
 			len(groups),
 			time.Since(start).Seconds(),
 		)
+		if earlyStopPatience > 0 && int(atomicEvalCount()-lastImprovementEval) >= earlyStopPatience {
+			stopReason = fmt.Sprintf("early_stop_no_%.2f%%_improvement_for_%d_evals", earlyStopMinDelta*100, earlyStopPatience)
+			fmt.Printf(
+				"ltgomea early stop best=%.6fs evals=%d last_significant_improvement_eval=%d patience=%d min_delta=%.4f elapsed=%.1fs\n",
+				best.Fitness,
+				atomicEvalCount(),
+				lastImprovementEval,
+				earlyStopPatience,
+				earlyStopMinDelta,
+				time.Since(start).Seconds(),
+			)
+			break
+		}
+	}
+	if int(atomicEvalCount()) >= budget {
+		stopReason = "budget_exhausted"
 	}
 
 	bestFlags := vectorToFlagList(best.Vector)
 	summary := ltSummary{
-		Algorithm:        "LTGOMEA",
-		BestFlags:        bestFlags,
-		BestFitness:      best.Fitness,
-		Budget:           budget,
-		CorrectnessMode:  getCorrectnessMode(),
-		Evaluations:      atomicEvalCount(),
-		Generations:      generations,
-		GroupTries:       groupTries,
-		IncorrectPenalty: incorrectPenaltySeconds(),
-		PopulationSize:   popSize,
-		SafeFlagsLocked:  lockSafeFlags(),
-		Seed:             seed,
-		SearchElapsedMs:  time.Since(start).Milliseconds(),
+		Algorithm:           "LTGOMEA",
+		BestFlags:           bestFlags,
+		BestFitness:         best.Fitness,
+		Budget:              budget,
+		CorrectnessMode:     getCorrectnessMode(),
+		EarlyStopped:        strings.HasPrefix(stopReason, "early_stop"),
+		EarlyStopMinDelta:   earlyStopMinDelta,
+		EarlyStopPatience:   earlyStopPatience,
+		Evaluations:         atomicEvalCount(),
+		Generations:         generations,
+		GenerationsDone:     generationsDone,
+		GroupTries:          groupTries,
+		IncorrectPenalty:    incorrectPenaltySeconds(),
+		LastImprovementEval: lastImprovementEval,
+		PopulationSize:      popSize,
+		SafeFlagsLocked:     lockSafeFlags(),
+		Seed:                seed,
+		SearchElapsedMs:     time.Since(start).Milliseconds(),
+		StopReason:          stopReason,
 	}
 	payload, _ := json.MarshalIndent(summary, "", "  ")
 	_ = os.WriteFile(filepath.Join(utils.ResultsPath, os.Args[1], "log", "ltgomea_summary.json"), payload, 0666)
@@ -521,6 +564,27 @@ func envInt64(name string, fallback int64) int64 {
 		return fallback
 	}
 	return value
+}
+
+func envFloat(name string, fallback float64) float64 {
+	value, err := strconv.ParseFloat(os.Getenv(name), 64)
+	if err != nil || value < 0 {
+		return fallback
+	}
+	return value
+}
+
+func isSignificantImprovement(oldBest float64, newBest float64, minDeltaFraction float64) bool {
+	if math.IsInf(oldBest, 0) || math.IsNaN(oldBest) {
+		return true
+	}
+	if math.IsInf(newBest, 0) || math.IsNaN(newBest) || newBest >= oldBest {
+		return false
+	}
+	if minDeltaFraction <= 0 {
+		return true
+	}
+	return (oldBest-newBest)/oldBest >= minDeltaFraction
 }
 
 func atomicEvalCount() uint64 {

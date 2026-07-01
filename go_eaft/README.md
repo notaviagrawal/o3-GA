@@ -22,6 +22,14 @@ Run the seeded linkage-tree GOMEA-style search:
 EAFT_WORKERS=6 LTGOMEA_BUDGET=1600 go run ./cmd/headless 2mm gcc ltgomea.json LTGOMEA
 ```
 
+Cut off flat tails with early stopping:
+
+```bash
+EAFT_WORKERS=6 LTGOMEA_BUDGET=1600 LTGOMEA_EARLY_STOP_PATIENCE=150 LTGOMEA_EARLY_STOP_MIN_DELTA=0.005 go run ./cmd/headless 2mm gcc ltgomea.json LTGOMEA
+```
+
+`LTGOMEA_EARLY_STOP_PATIENCE` stops the run after that many evaluations without a meaningful new best. `LTGOMEA_EARLY_STOP_MIN_DELTA` is the minimum fractional improvement needed to reset patience, so `0.005` means tiny improvements below 0.5% are treated as timing noise.
+
 By default, search uses EAFT-style unsafe whole-process timing. Use `EAFT_CORRECTNESS=exact` to reject wrong-output candidates immediately, or `EAFT_CORRECTNESS=metric` to log raw runtime while adding `EAFT_INCORRECT_PENALTY` seconds to the candidate fitness when the dump-output check fails.
 
 For exact PolyBench output searches, `EAFT_LOCK_SAFE_FLAGS=1` forces known semantic-risk flags such as `fast-math`, `associative-math`, and `finite-math-only` off. This keeps the search from repeatedly rediscovering very fast but wrong-output floating-point configurations.
