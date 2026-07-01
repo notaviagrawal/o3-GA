@@ -60,7 +60,7 @@ func addPolybenchDependencies(command string, problem string, out_file string) s
 	if dataset := os.Getenv("EAFT_DATASET"); dataset != "" {
 		command += "-D" + dataset + " "
 	}
-	command += path.Join(utils.Files, problem) + `.c` + ` -I` + utils.Utilities + ` --include ` + `polybench.c` + ` -o ` + path.Join(utils.ResultsPath, os.Args[1], "bin", out_file)
+	command += path.Join(utils.Files, problem) + `.c` + ` -I` + utils.Utilities + ` --include ` + `polybench.c` + ` -o ` + path.Join(utils.ResultsPath, os.Args[1], "bin", out_file) + ` -lm`
 	return command
 }
 
