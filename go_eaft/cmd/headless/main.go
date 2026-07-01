@@ -49,6 +49,11 @@ func main() {
 		earlyStopMinDelta = "0.005"
 	}
 	fmt.Printf("LTGOMEA_EARLY_STOP_MIN_DELTA=%s\n", earlyStopMinDelta)
+	earlyStopMinEvals := os.Getenv("LTGOMEA_EARLY_STOP_MIN_EVALS")
+	if earlyStopMinEvals == "" {
+		earlyStopMinEvals = "0"
+	}
+	fmt.Printf("LTGOMEA_EARLY_STOP_MIN_EVALS=%s\n", earlyStopMinEvals)
 	warmStart := os.Getenv("LTGOMEA_WARM_START")
 	if warmStart == "" {
 		warmStart = "on"

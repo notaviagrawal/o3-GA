@@ -30,7 +30,7 @@ Cut off flat tails with early stopping:
 EAFT_WORKERS=6 LTGOMEA_BUDGET=1600 LTGOMEA_EARLY_STOP_PATIENCE=150 LTGOMEA_EARLY_STOP_MIN_DELTA=0.005 go run ./cmd/headless 2mm gcc ltgomea.json LTGOMEA
 ```
 
-`LTGOMEA_EARLY_STOP_PATIENCE` stops the run after that many evaluations without a meaningful new best. `LTGOMEA_EARLY_STOP_MIN_DELTA` is the minimum fractional improvement needed to reset patience, so `0.005` means tiny improvements below 0.5% are treated as timing noise.
+`LTGOMEA_EARLY_STOP_PATIENCE` stops the run after that many evaluations without a meaningful new best. `LTGOMEA_EARLY_STOP_MIN_DELTA` is the minimum fractional improvement needed to reset patience, so `0.005` means tiny improvements below 0.5% are treated as timing noise. `LTGOMEA_EARLY_STOP_MIN_EVALS` keeps early stopping disabled until a minimum number of evaluations have completed, which is useful for tiny kernels where the first generation is too noisy.
 
 By default, search uses EAFT-style unsafe whole-process timing. Use `EAFT_CORRECTNESS=exact` to reject wrong-output candidates immediately, or `EAFT_CORRECTNESS=metric` to log raw runtime while adding `EAFT_INCORRECT_PENALTY` seconds to the candidate fitness when the dump-output check fails.
 

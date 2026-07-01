@@ -59,6 +59,7 @@ type ltSummary struct {
 	CorrectnessMode     string   `json:"correctness_mode"`
 	EarlyStopped        bool     `json:"early_stopped"`
 	EarlyStopMinDelta   float64  `json:"early_stop_min_delta_fraction"`
+	EarlyStopMinEvals   int      `json:"early_stop_min_evals"`
 	EarlyStopPatience   int      `json:"early_stop_patience_evals"`
 	Evaluations         uint64   `json:"evaluations"`
 	Generations         int      `json:"generations"`
@@ -85,6 +86,7 @@ func LTGOMEARunner() {
 	groupTries := envInt("LTGOMEA_GROUP_TRIES", 4)
 	earlyStopPatience := envInt("LTGOMEA_EARLY_STOP_PATIENCE", 0)
 	earlyStopMinDelta := envFloat("LTGOMEA_EARLY_STOP_MIN_DELTA", 0.005)
+	earlyStopMinEvals := envInt("LTGOMEA_EARLY_STOP_MIN_EVALS", 0)
 	warmStartEnabled := envBool("LTGOMEA_WARM_START", true)
 	if budget < popSize {
 		budget = popSize
@@ -122,13 +124,14 @@ func LTGOMEARunner() {
 	stopReason := "generation_limit"
 
 	fmt.Printf(
-		"ltgomea init pop=%d generations=%d budget=%d group_tries=%d early_stop_patience=%d early_stop_min_delta=%.4f warm_start=%t warm_start_seeds=%s correctness=%s safe_flags_locked=%t best=%.6fs elapsed=%.1fs\n",
+		"ltgomea init pop=%d generations=%d budget=%d group_tries=%d early_stop_patience=%d early_stop_min_delta=%.4f early_stop_min_evals=%d warm_start=%t warm_start_seeds=%s correctness=%s safe_flags_locked=%t best=%.6fs elapsed=%.1fs\n",
 		popSize,
 		generations,
 		budget,
 		groupTries,
 		earlyStopPatience,
 		earlyStopMinDelta,
+		earlyStopMinEvals,
 		warmStartEnabled,
 		strings.Join(warmStartSeeds, ","),
 		getCorrectnessMode(),
@@ -205,15 +208,16 @@ func LTGOMEARunner() {
 			len(groups),
 			time.Since(start).Seconds(),
 		)
-		if earlyStopPatience > 0 && int(atomicEvalCount()-lastImprovementEval) >= earlyStopPatience {
-			stopReason = fmt.Sprintf("early_stop_no_%.2f%%_improvement_for_%d_evals", earlyStopMinDelta*100, earlyStopPatience)
+		if earlyStopPatience > 0 && int(atomicEvalCount()) >= earlyStopMinEvals && int(atomicEvalCount()-lastImprovementEval) >= earlyStopPatience {
+			stopReason = fmt.Sprintf("early_stop_no_%.2f%%_improvement_for_%d_evals_after_min_%d_evals", earlyStopMinDelta*100, earlyStopPatience, earlyStopMinEvals)
 			fmt.Printf(
-				"ltgomea early stop best=%.6fs evals=%d last_significant_improvement_eval=%d patience=%d min_delta=%.4f elapsed=%.1fs\n",
+				"ltgomea early stop best=%.6fs evals=%d last_significant_improvement_eval=%d patience=%d min_delta=%.4f min_evals=%d elapsed=%.1fs\n",
 				best.Fitness,
 				atomicEvalCount(),
 				lastImprovementEval,
 				earlyStopPatience,
 				earlyStopMinDelta,
+				earlyStopMinEvals,
 				time.Since(start).Seconds(),
 			)
 			break
@@ -232,6 +236,7 @@ func LTGOMEARunner() {
 		CorrectnessMode:     getCorrectnessMode(),
 		EarlyStopped:        strings.HasPrefix(stopReason, "early_stop"),
 		EarlyStopMinDelta:   earlyStopMinDelta,
+		EarlyStopMinEvals:   earlyStopMinEvals,
 		EarlyStopPatience:   earlyStopPatience,
 		Evaluations:         atomicEvalCount(),
 		Generations:         generations,
