@@ -280,7 +280,6 @@ func warmStartVectors(enabled bool) []ltWarmStart {
 		opt  string
 	}{
 		{name: "O3", opt: "O3"},
-		{name: "Ofast", opt: "Ofast"},
 	}
 	seen := map[string]bool{}
 	var out []ltWarmStart

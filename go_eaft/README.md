@@ -22,7 +22,7 @@ Run the seeded linkage-tree GOMEA-style search:
 EAFT_WORKERS=6 LTGOMEA_BUDGET=1600 go run ./cmd/headless 2mm gcc ltgomea.json LTGOMEA
 ```
 
-LT-GOMEA warm-starts from GCC's `-O3` and `-Ofast` optimizer flag states, then fills the rest of the population randomly. Disable that ablation-style with `LTGOMEA_WARM_START=0`.
+LT-GOMEA warm-starts from GCC's `-O3` optimizer flag state, then fills the rest of the population randomly. Disable that ablation-style with `LTGOMEA_WARM_START=0`.
 
 Cut off flat tails with early stopping:
 
