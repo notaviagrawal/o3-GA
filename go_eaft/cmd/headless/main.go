@@ -49,6 +49,11 @@ func main() {
 		earlyStopMinDelta = "0.005"
 	}
 	fmt.Printf("LTGOMEA_EARLY_STOP_MIN_DELTA=%s\n", earlyStopMinDelta)
+	warmStart := os.Getenv("LTGOMEA_WARM_START")
+	if warmStart == "" {
+		warmStart = "on"
+	}
+	fmt.Printf("LTGOMEA_WARM_START=%s\n", warmStart)
 	switch os.Args[4] {
 	case "GA":
 		scripts.GARunner()

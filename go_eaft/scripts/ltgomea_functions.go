@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -20,6 +21,11 @@ import (
 type ltIndividual struct {
 	Vector  Vector
 	Fitness float64
+}
+
+type ltWarmStart struct {
+	Name   string
+	Vector Vector
 }
 
 type mixingGroup struct {
@@ -65,6 +71,8 @@ type ltSummary struct {
 	Seed                int64    `json:"seed"`
 	SearchElapsedMs     int64    `json:"search_elapsed_ms"`
 	StopReason          string   `json:"stop_reason"`
+	WarmStartEnabled    bool     `json:"warm_start_enabled"`
+	WarmStartSeeds      []string `json:"warm_start_seeds"`
 }
 
 func LTGOMEARunner() {
@@ -77,6 +85,7 @@ func LTGOMEARunner() {
 	groupTries := envInt("LTGOMEA_GROUP_TRIES", 4)
 	earlyStopPatience := envInt("LTGOMEA_EARLY_STOP_PATIENCE", 0)
 	earlyStopMinDelta := envFloat("LTGOMEA_EARLY_STOP_MIN_DELTA", 0.005)
+	warmStartEnabled := envBool("LTGOMEA_WARM_START", true)
 	if budget < popSize {
 		budget = popSize
 	}
@@ -91,9 +100,15 @@ func LTGOMEARunner() {
 	cache := map[string]float64{}
 	population := make([]ltIndividual, popSize)
 	best := ltIndividual{Fitness: math.Inf(1)}
+	warmStartSeeds := []string{}
 
+	warmStarts := warmStartVectors(warmStartEnabled)
 	for i := range population {
 		vector := randomLTVector(rng)
+		if i < len(warmStarts) {
+			vector = warmStarts[i].Vector
+			warmStartSeeds = append(warmStartSeeds, warmStarts[i].Name)
+		}
 		fitness := evaluateLTVector(vector, cache)
 		population[i] = ltIndividual{Vector: vector, Fitness: fitness}
 		if fitness < best.Fitness {
@@ -107,13 +122,15 @@ func LTGOMEARunner() {
 	stopReason := "generation_limit"
 
 	fmt.Printf(
-		"ltgomea init pop=%d generations=%d budget=%d group_tries=%d early_stop_patience=%d early_stop_min_delta=%.4f correctness=%s safe_flags_locked=%t best=%.6fs elapsed=%.1fs\n",
+		"ltgomea init pop=%d generations=%d budget=%d group_tries=%d early_stop_patience=%d early_stop_min_delta=%.4f warm_start=%t warm_start_seeds=%s correctness=%s safe_flags_locked=%t best=%.6fs elapsed=%.1fs\n",
 		popSize,
 		generations,
 		budget,
 		groupTries,
 		earlyStopPatience,
 		earlyStopMinDelta,
+		warmStartEnabled,
+		strings.Join(warmStartSeeds, ","),
 		getCorrectnessMode(),
 		lockSafeFlags(),
 		best.Fitness,
@@ -227,6 +244,8 @@ func LTGOMEARunner() {
 		Seed:                seed,
 		SearchElapsedMs:     time.Since(start).Milliseconds(),
 		StopReason:          stopReason,
+		WarmStartEnabled:    warmStartEnabled,
+		WarmStartSeeds:      warmStartSeeds,
 	}
 	payload, _ := json.MarshalIndent(summary, "", "  ")
 	_ = os.WriteFile(filepath.Join(utils.ResultsPath, os.Args[1], "log", "ltgomea_summary.json"), payload, 0666)
@@ -250,6 +269,72 @@ func evaluateLTVector(vector Vector, cache map[string]float64) float64 {
 
 func randomLTVector(rng *rand.Rand) Vector {
 	return constrainedVector(Vector(InitBinaryFloat64(50, 0, 2, rng)))
+}
+
+func warmStartVectors(enabled bool) []ltWarmStart {
+	if !enabled {
+		return nil
+	}
+	seeds := []struct {
+		name string
+		opt  string
+	}{
+		{name: "O3", opt: "O3"},
+		{name: "Ofast", opt: "Ofast"},
+	}
+	seen := map[string]bool{}
+	var out []ltWarmStart
+	for _, seed := range seeds {
+		vector, ok := optLevelVector(seed.opt)
+		if !ok {
+			fmt.Printf("ltgomea warm start skipped seed=%s reason=unavailable\n", seed.name)
+			continue
+		}
+		key := vectorKey(vector)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, ltWarmStart{Name: seed.name, Vector: vector})
+	}
+	return out
+}
+
+func optLevelVector(optLevel string) (Vector, bool) {
+	if len(availableFlags) == 0 {
+		return nil, false
+	}
+	args := []string{"-Q", "-" + optLevel, "--help=optimizers"}
+	cmd := exec.Command(os.Args[2], args...)
+	stdout, err := cmd.Output()
+	if err != nil {
+		return nil, false
+	}
+	states := parseOptimizerStates(string(stdout))
+	vector := make(Vector, 50)
+	for i := range vector {
+		if i >= len(availableFlags) {
+			break
+		}
+		if states[availableFlags[i]] {
+			vector[i] = 1
+		}
+	}
+	return constrainedVector(vector), true
+}
+
+func parseOptimizerStates(output string) map[string]bool {
+	states := map[string]bool{}
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !strings.HasPrefix(fields[0], "-f") {
+			continue
+		}
+		name := strings.TrimPrefix(fields[0], "-f")
+		status := strings.ToLower(fields[len(fields)-1])
+		states[name] = status == "[enabled]"
+	}
+	return states
 }
 
 func vectorKey(vector Vector) string {
@@ -572,6 +657,14 @@ func envFloat(name string, fallback float64) float64 {
 		return fallback
 	}
 	return value
+}
+
+func envBool(name string, fallback bool) bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	if raw == "" {
+		return fallback
+	}
+	return raw == "1" || raw == "true" || raw == "yes" || raw == "on"
 }
 
 func isSignificantImprovement(oldBest float64, newBest float64, minDeltaFraction float64) bool {
